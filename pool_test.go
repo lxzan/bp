@@ -7,10 +7,10 @@ import (
 )
 
 func TestBinaryCeil(t *testing.T) {
-	assert.Equal(t, binaryCeil(3), uint32(4))
-	assert.Equal(t, binaryCeil(125), uint32(128))
-	assert.Equal(t, binaryCeil(1000), uint32(1024))
-	assert.Equal(t, binaryCeil(65000), uint32(65536))
+	assert.Equal(t, binaryCeil(3), 4)
+	assert.Equal(t, binaryCeil(125), 128)
+	assert.Equal(t, binaryCeil(1000), 1024)
+	assert.Equal(t, binaryCeil(65000), 65536)
 }
 
 func TestPool_Get(t *testing.T) {
@@ -34,8 +34,13 @@ func TestPool_Put(t *testing.T) {
 	pool.Put(new(bytes.Buffer))
 	assert.Equal(t, pool.Get(501).Cap(), 512)
 
-	pool.pools[2].Put(bytes.NewBuffer(make([]byte, 800)))
-	pool.pools[2].Put(bytes.NewBuffer(make([]byte, 1000)))
+	pool.Put(bytes.NewBuffer(make([]byte, 800)))
+	pool.Put(bytes.NewBuffer(make([]byte, 1000)))
+	pool.Put(bytes.NewBuffer(make([]byte, 1024)))
 	assert.Equal(t, pool.Get(900).Cap(), 1024)
 	assert.Equal(t, pool.Get(800).Cap(), 1024)
+	assert.Equal(t, pool.Get(600).Cap(), 1024)
+
+	pool.pools[2].Put(bytes.NewBuffer(make([]byte, 800)))
+	assert.GreaterOrEqual(t, pool.Get(900).Cap(), 1024)
 }
