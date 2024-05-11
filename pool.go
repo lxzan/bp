@@ -5,55 +5,58 @@ import (
 	"sync"
 )
 
-var _pool = NewPool(256, 256*1024)
+var __pool = NewPool(256, 256*1024)
 
-func GetPool() *Pool { return _pool }
+// Get fetch a buffer from the default pool, of at least n bytes
+func Get(n int) *bytes.Buffer { return __pool.Get(n) }
+
+// Put adds b to the default pool.
+func Put(b *bytes.Buffer) { __pool.Put(b) }
 
 type Pool struct {
-	pools      []*sync.Pool
-	limits     []int
-	size2index map[uint32]uint32
+	begin, end int
+	shards     map[int]*sync.Pool
 }
 
+// NewPool Creating a buffer pool
+// Left, right indicate the interval range of the buffer pool, they will be transformed into pow(2,n)。
+// Below left, Get method will return at least left bytes; above right, Put method will not reclaim the buffer.
 func NewPool(left, right uint32) *Pool {
-	var p = &Pool{size2index: map[uint32]uint32{}}
-	var begin, end = binaryCeil(left), binaryCeil(right)
-	var index = uint32(0)
+	var begin, end = int(binaryCeil(left)), int(binaryCeil(right))
+	var p = &Pool{
+		begin: begin, end: end,
+		shards: map[int]*sync.Pool{},
+	}
 	for i := begin; i <= end; i *= 2 {
 		capacity := i
-		pool := &sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 0, capacity)) }}
-		p.pools = append(p.pools, pool)
-		p.limits = append(p.limits, int(i))
-		p.size2index[i] = index
-		index++
+		p.shards[i] = &sync.Pool{
+			New: func() any { return bytes.NewBuffer(make([]byte, 0, capacity)) },
+		}
 	}
 	return p
 }
 
+// Put adds b to the pool.
 func (p *Pool) Put(b *bytes.Buffer) {
-	if b == nil || b.Cap() == 0 {
-		return
-	}
-	size := binaryCeil(uint32(b.Cap()))
-	if index, ok := p.size2index[size]; ok {
-		p.pools[index].Put(b)
+	if b != nil {
+		if pool, ok := p.shards[b.Cap()]; ok {
+			pool.Put(b)
+		}
 	}
 }
 
+// Get fetch a buffer from the buffer pool, of at least n bytes
 func (p *Pool) Get(n int) *bytes.Buffer {
-	var size = max(int(binaryCeil(uint32(n))), p.limits[0])
-	var index, ok = p.size2index[uint32(size)]
-	if !ok {
-		return bytes.NewBuffer(make([]byte, 0, n))
+	var size = maxInt(int(binaryCeil(uint32(n))), p.begin)
+	if pool, ok := p.shards[size]; ok {
+		b := pool.Get().(*bytes.Buffer)
+		if b.Cap() < size {
+			b.Grow(size)
+		}
+		b.Reset()
+		return b
 	}
-
-	b := p.pools[index].Get().(*bytes.Buffer)
-	b.Reset()
-	if b.Cap() < size {
-		b.Grow(size)
-	}
-	b.Reset()
-	return b
+	return bytes.NewBuffer(make([]byte, 0, n))
 }
 
 func binaryCeil(v uint32) uint32 {
@@ -67,7 +70,7 @@ func binaryCeil(v uint32) uint32 {
 	return v
 }
 
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}
